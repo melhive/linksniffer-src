@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060a0d">
+<title>LinkSniffer — Threat Recon</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="scanlines" aria-hidden="true"></div>
+
+<header class="hud-header">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="17" class="ring ring-outer"/>
+      <circle cx="20" cy="20" r="10" class="ring ring-inner"/>
+      <line x1="20" y1="1" x2="20" y2="8"/>
+      <line x1="20" y1="32" x2="20" y2="39"/>
+      <line x1="1" y1="20" x2="8" y2="20"/>
+      <line x1="32" y1="20" x2="39" y2="20"/>
+    </svg>
+    <div class="brand-text">
+      <h1>LINKSNIFFER</h1>
+      <p class="tagline">Target acquisition &amp; threat recon for URLs</p>
+    </div>
+  </div>
+  <div class="conn-status" id="connStatus" data-state="checking">
+    <span class="dot"></span><span class="conn-label">LINK...</span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="scan" role="tab" aria-selected="true">SCAN</button>
+  <button class="tab" data-tab="history" role="tab" aria-selected="false">HISTORY <span id="historyCount" class="count-badge">0</span></button>
+</nav>
+
+<main>
+
+  <!-- SCAN PANEL -->
+  <section id="panel-scan" class="panel" data-active="true">
+
+    <form id="scanForm" class="scan-input" autocomplete="off">
+      <div class="input-frame">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+        <input id="urlInput" type="text" inputmode="url" placeholder="paste target url — e.g. http://example.com/login" required>
+      </div>
+      <button type="submit" id="scanBtn" class="scan-btn">
+        <span class="scan-btn-label">SCAN</span>
+      </button>
+    </form>
+
+    <!-- idle state -->
+    <div id="idleState" class="state-block">
+      <div class="reticle" aria-hidden="true">
+        <div class="reticle-ring r1"></div>
+        <div class="reticle-ring r2"></div>
+        <div class="reticle-ring r3"></div>
+        <div class="reticle-sweep"></div>
+        <div class="reticle-cross"></div>
+      </div>
+      <p class="idle-copy">Awaiting target. Paste a link above and initiate scan.</p>
+    </div>
+
+    <!-- scanning state -->
+    <div id="scanningState" class="state-block hidden">
+      <div class="reticle scanning" aria-hidden="true">
+        <div class="reticle-ring r1"></div>
+        <div class="reticle-ring r2"></div>
+        <div class="reticle-ring r3"></div>
+        <div class="reticle-sweep spin"></div>
+        <div class="reticle-cross"></div>
+        <div class="reticle-pct" id="reticlePct">0%</div>
+      </div>
+      <div class="terminal" id="terminalLog" aria-live="polite"></div>
+    </div>
+
+    <!-- results state -->
+    <div id="resultsState" class="state-block hidden">
+      <div class="verdict-card" id="verdictCard">
+        <div class="verdict-top">
+          <div class="verdict-badge" id="verdictBadge">SAFE</div>
+          <div class="verdict-score">
+            <span class="score-num" id="scoreNum">0</span><span class="score-pct">%</span>
+            <span class="score-label">SAFETY INDEX</span>
+          </div>
+        </div>
+        <div class="verdict-target" id="verdictTarget">—</div>
+        <div class="verdict-meter">
+          <div class="verdict-meter-fill" id="verdictMeterFill"></div>
+        </div>
+      </div>
+
+      <div class="dossier">
+        <h2 class="dossier-title">TARGET DOSSIER</h2>
+        <div class="dossier-grid" id="dossierGrid"></div>
+      </div>
+
+      <div class="findings">
+        <h2 class="dossier-title">INVESTIGATION SUMMARY</h2>
+        <ul class="findings-list" id="findingsList"></ul>
+      </div>
+
+      <div class="source-note" id="sourceNote"></div>
+
+      <button class="rescan-btn" id="rescanBtn">NEW SCAN</button>
+    </div>
+
+  </section>
+
+  <!-- HISTORY PANEL -->
+  <section id="panel-history" class="panel" data-active="false">
+    <div class="history-toolbar">
+      <input id="historySearch" type="text" placeholder="filter history by url or verdict...">
+      <button id="clearHistoryBtn" class="ghost-btn">CLEAR ALL</button>
+    </div>
+    <ul class="history-list" id="historyList"></ul>
+    <p class="empty-note hidden" id="historyEmpty">No targets scanned yet.</p>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <span id="footerNote">Local heuristics active. External threat intel not yet connected.</span>
+</footer>
+
+<script src="heuristics.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

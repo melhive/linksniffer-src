@@ -1,0 +1,14 @@
+{
+  "name": "LinkSniffer — Threat Recon",
+  "short_name": "LinkSniffer",
+  "description": "Scan links for phishing, scam, and malware risk with local heuristics and external threat intelligence.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#060a0d",
+  "theme_color": "#060a0d",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
