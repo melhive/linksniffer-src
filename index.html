@@ -101,6 +101,11 @@
         <div class="dossier-grid" id="dossierGrid"></div>
       </div>
 
+      <div class="dossier hidden" id="chainBox">
+        <h2 class="dossier-title">REDIRECT TRACE</h2>
+        <ol class="chain-list" id="chainList"></ol>
+      </div>
+
       <div class="findings">
         <h2 class="dossier-title">INVESTIGATION SUMMARY</h2>
         <ul class="findings-list" id="findingsList"></ul>
@@ -126,7 +131,7 @@
 </main>
 
 <footer class="app-footer">
-  <span id="footerNote">Local heuristics active. External threat intel not yet connected.</span>
+  <span id="footerVersion"></span> · <span id="footerNote">Local heuristics active. External threat intel not yet connected.</span>
 </footer>
 
 <script src="heuristics.js"></script>

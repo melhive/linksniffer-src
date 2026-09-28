@@ -1,4 +1,7 @@
-# LinkSniffer — Setup Guide
+# LinkSniffer — Setup Guide (v1.1.0)
+
+**What's new in 1.1.0:** redirect-chain unmasking, typosquat detection, correct handling of domains like `.com.ph` / `.co.uk`, confidence levels, safer rendering (no HTML injection), auto-updating service worker, rate-limited and origin-locked worker.
+
 
 ## The app works right now, with zero setup
 
@@ -99,19 +102,22 @@ the Pages site.
 
 ---
 
-## Tightening security later (optional but recommended)
+## Locking the worker to your site (recommended)
 
-In `worker/worker.js`, change:
+In `worker/wrangler.toml`, uncomment the `[vars]` block and set your GitHub Pages
+origin (no path, no trailing slash):
 
-```js
-const ALLOWED_ORIGIN = "*";
+```toml
+[vars]
+ALLOWED_ORIGIN = "https://yourname.github.io"
 ```
 
-to your actual GitHub Pages URL, e.g.:
+Then run `wrangler deploy` again. Browsers on other sites will be refused.
+The worker also rate-limits each client to 20 scans per minute and refuses
+private/internal addresses.
 
-```js
-const ALLOWED_ORIGIN = "https://yourname.github.io";
-```
+## Updating the app later
 
-This stops anyone else from calling your worker (and burning your API quota)
-from a different website.
+The service worker is network-first and auto-reloads when a new version is
+detected. When you ship a change, bump `VERSION` in `sw.js` and `APP_VERSION`
+in `app.js`, push to GitHub, and installed copies pick it up on next open.

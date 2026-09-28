@@ -3,6 +3,7 @@
    the Cloudflare Worker proxy from the /worker folder.
    See SETUP.md. Leave as null to run on local heuristics only.
    ============================================================ */
+const APP_VERSION = "1.1.0";
 const WORKER_API_URL = null; // e.g. "https://linksniffer-api.YOURNAME.workers.dev/scan"
 
 /* ---------------- IndexedDB (scan history) ---------------- */
@@ -50,6 +51,19 @@ async function clearAllScans() {
   });
 }
 
+
+/* ---------------- Safe DOM helper (no innerHTML with untrusted data) ---------------- */
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  return node;
+}
+
 /* ---------------- DOM refs ---------------- */
 const $ = (id) => document.getElementById(id);
 const scanForm = $("scanForm");
@@ -91,9 +105,9 @@ updateConnStatus();
 const SCAN_STEPS = [
   "INITIALIZING TARGET LOCK",
   "NORMALIZING URL",
-  "RESOLVING HOSTNAME",
+  "UNMASKING REDIRECT CHAIN",
   "CHECKING DOMAIN STRUCTURE",
-  "SCANNING FOR HOMOGRAPH / PUNYCODE",
+  "SCANNING FOR HOMOGRAPH / TYPOSQUAT",
   "CROSS-REFERENCING BLACKLISTS",
   "QUERYING THREAT INTEL SOURCES",
   "SCORING RISK PROFILE",
@@ -101,7 +115,7 @@ const SCAN_STEPS = [
 ];
 
 function runTerminalAnimation() {
-  terminalLog.innerHTML = "";
+  terminalLog.replaceChildren();
   reticlePct.textContent = "0%";
   return new Promise((resolve) => {
     let i = 0;
@@ -111,7 +125,8 @@ function runTerminalAnimation() {
       const line = document.createElement("div");
       line.className = "line";
       line.style.animationDelay = "0s";
-      line.innerHTML = `<span class="t">[${String(i+1).padStart(2,"0")}]</span>${SCAN_STEPS[i]}...`;
+      line.appendChild(el("span", { class: "t", text: `[${String(i+1).padStart(2,"0")}]` }));
+      line.appendChild(document.createTextNode(SCAN_STEPS[i] + "..."));
       terminalLog.appendChild(line);
       terminalLog.scrollTop = terminalLog.scrollHeight;
       reticlePct.textContent = Math.round(((i + 1) / total) * 100) + "%";
@@ -144,31 +159,58 @@ async function fetchExternal(url) {
 
 /* ---------------- Verdict combining ---------------- */
 function combineResults(localResult, externalResult) {
-  let risk, findings = [...localResult.findings], sources = ["Local heuristics"];
+  let localRisk = localResult.risk;
+  let findings = [...localResult.findings];
+  let sources = ["Local heuristics"];
+  let chain = [localResult.url];
+  let finalUrl = null;
 
-  if (externalResult && typeof externalResult.riskScore === "number") {
-    // 35% local pattern analysis, 65% real threat-intel signal
-    risk = Math.round(localResult.risk * 0.35 + externalResult.riskScore * 0.65);
+  const hasExternal = !!(externalResult && typeof externalResult.riskScore === "number");
+
+  if (hasExternal) {
+    chain = Array.isArray(externalResult.chain) && externalResult.chain.length ? externalResult.chain : chain;
+    finalUrl = externalResult.finalUrl || null;
+
+    // Re-run local analysis on the unmasked destination and keep the worse result
+    if (finalUrl && finalUrl !== localResult.url) {
+      const finalLocal = analyzeUrlLocally(finalUrl);
+      if (finalLocal.risk > localRisk) localRisk = finalLocal.risk;
+      finalLocal.findings
+        .filter(f => f.label !== "No local red flags")
+        .forEach(f => findings.push({ ...f, label: "Destination: " + f.label }));
+    }
     if (Array.isArray(externalResult.findings)) findings = findings.concat(externalResult.findings);
     if (Array.isArray(externalResult.sources)) sources = sources.concat(externalResult.sources);
-  } else {
-    risk = localResult.risk;
   }
 
-  risk = Math.max(0, Math.min(100, risk));
-  const safety = 100 - risk;
-  let level;
-  if (risk <= 25) level = "safe";
-  else if (risk <= 60) level = "suspicious";
-  else level = "malicious";
+  const risk = hasExternal
+    ? Math.round(localRisk * 0.35 + externalResult.riskScore * 0.65)
+    : localRisk;
 
-  return { risk, safety, level, findings, sources, external: !!externalResult };
+  const clamped = Math.max(0, Math.min(100, risk));
+  const safety = 100 - clamped;
+  let level;
+  if (clamped <= 25) level = "safe";
+  else if (clamped <= 60) level = "suspicious";
+  else level = "malicious";
+  // Pattern analysis alone can't prove a link is malicious — require a stronger score without external evidence
+  if (!hasExternal && level === "malicious" && clamped < 75) level = "suspicious";
+
+  // Confidence: how much real evidence backs the verdict
+  const realSources = sources.filter(s => !/^(Local heuristics|No external|Redirect unmasking)/.test(s) && !/no prior report/i.test(s));
+  let confidence = "LOW";
+  if (hasExternal && realSources.length >= 2) confidence = "HIGH";
+  else if (hasExternal && realSources.length === 1) confidence = "MEDIUM";
+
+  return { risk: clamped, safety, level, findings, sources, external: hasExternal, confidence, chain, finalUrl };
 }
 
 /* ---------------- Results rendering ---------------- */
+const LEVEL_LABEL = { safe: "NO THREATS DETECTED", suspicious: "SUSPICIOUS", malicious: "MALICIOUS" };
+
 function renderResults(url, combined, localResult) {
   const badge = $("verdictBadge");
-  badge.textContent = combined.level.toUpperCase();
+  badge.textContent = LEVEL_LABEL[combined.level];
   badge.dataset.level = combined.level;
 
   $("scoreNum").textContent = combined.safety;
@@ -179,31 +221,43 @@ function renderResults(url, combined, localResult) {
   fill.dataset.level = combined.level;
 
   const grid = $("dossierGrid");
-  grid.innerHTML = "";
+  grid.replaceChildren();
   const rows = [
     ["HOST", localResult.host || "—"],
+    ["REGISTERED DOMAIN", localResult.rootDomain || "—"],
     ["PROTOCOL", url.startsWith("https") ? "HTTPS" : "HTTP"],
+    ["CONFIDENCE", combined.confidence || "LOW"],
     ["SCAN MODE", combined.external ? "FULL (LOCAL + EXTERNAL)" : "LOCAL ONLY"],
-    ["SCANNED AT", new Date().toLocaleString()],
+    ["SCANNED AT", new Date(combined.timestamp || Date.now()).toLocaleString()],
   ];
+  if (combined.finalUrl && combined.finalUrl !== url) rows.push(["FINAL DESTINATION", combined.finalUrl]);
   rows.forEach(([k, v]) => {
-    const div = document.createElement("div");
-    div.className = "dossier-item";
-    div.innerHTML = `<span class="k">${k}</span><span class="v">${v}</span>`;
-    grid.appendChild(div);
+    grid.appendChild(el("div", { class: "dossier-item" }, el("span", { class: "k", text: k }), el("span", { class: "v", text: v })));
   });
+
+  // Redirect chain (only when there is more than one hop)
+  const chainBox = $("chainBox");
+  const chainList = $("chainList");
+  chainList.replaceChildren();
+  if (combined.chain && combined.chain.length > 1) {
+    combined.chain.forEach((u, i) => {
+      chainList.appendChild(el("li", {}, el("span", { class: "hop", text: i === 0 ? "START" : (i === combined.chain.length - 1 ? "END" : "HOP " + i) }), el("span", { class: "hopurl", text: u })));
+    });
+    chainBox.classList.remove("hidden");
+  } else {
+    chainBox.classList.add("hidden");
+  }
 
   const list = $("findingsList");
-  list.innerHTML = "";
+  list.replaceChildren();
   combined.findings.forEach(f => {
-    const li = document.createElement("li");
-    li.innerHTML = `<span class="sev ${f.severity}"></span><span class="txt"><b>${f.label}</b><span>${f.detail}</span></span>`;
-    list.appendChild(li);
+    list.appendChild(el("li", {}, el("span", { class: "sev " + f.severity }), el("span", { class: "txt" }, el("b", { text: f.label }), el("span", { text: f.detail }))));
   });
 
-  $("sourceNote").textContent = combined.external
+  const note = combined.external
     ? `Sources consulted: ${combined.sources.join(", ")}.`
-    : `Sources consulted: ${combined.sources.join(", ")}. Connect the worker API (see SETUP.md) for real-time threat-intel cross-checks.`;
+    : `Sources consulted: ${combined.sources.join(", ")}. Confidence is low: only URL-pattern analysis ran. Connect the worker API (see SETUP.md) for real threat-intel cross-checks.`;
+  $("sourceNote").textContent = note + " No detection does not guarantee a link is safe.";
 
   idleState.classList.add("hidden");
   scanningState.classList.add("hidden");
@@ -221,17 +275,16 @@ async function renderHistory(filter = "") {
     ? scans.filter(s => s.url.toLowerCase().includes(filter.toLowerCase()) || s.level.includes(filter.toLowerCase()))
     : scans;
 
-  list.innerHTML = "";
+  list.replaceChildren();
   empty.classList.toggle("hidden", filtered.length > 0);
 
   filtered.forEach(s => {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <span class="tag ${s.level}">${s.level.toUpperCase()}</span>
-      <span class="info">
-        <span class="url">${s.url}</span>
-        <span class="meta">${new Date(s.timestamp).toLocaleString()} · safety ${s.safety}%</span>
-      </span>`;
+    const li = el("li", {},
+      el("span", { class: "tag " + s.level, text: (LEVEL_LABEL[s.level] || s.level).split(" ")[0] }),
+      el("span", { class: "info" },
+        el("span", { class: "url", text: s.url }),
+        el("span", { class: "meta", text: `${new Date(s.timestamp).toLocaleString()} · safety ${s.safety}%` })
+      ));
     li.addEventListener("click", () => {
       document.querySelector('.tab[data-tab="scan"]').click();
       renderResults(s.url, s, s.localResult);
@@ -265,6 +318,7 @@ scanForm.addEventListener("submit", async (e) => {
   scanningState.classList.remove("hidden");
 
   const localResult = analyzeUrlLocally(url);
+  localResult.url = url;
 
   const [_, externalResult] = await Promise.all([
     runTerminalAnimation(),
@@ -283,6 +337,9 @@ scanForm.addEventListener("submit", async (e) => {
     findings: combined.findings,
     sources: combined.sources,
     external: combined.external,
+    confidence: combined.confidence,
+    chain: combined.chain,
+    finalUrl: combined.finalUrl,
     localResult,
   };
   await saveScan(record);
@@ -298,9 +355,19 @@ $("rescanBtn").addEventListener("click", () => {
   urlInput.focus();
 });
 
-/* ---------------- Service worker ---------------- */
+renderHistory();
+
+/* ---------------- Service worker (auto-update) ---------------- */
 if ("serviceWorker" in navigator) {
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloaded || !navigator.serviceWorker.controller) return;
+    reloaded = true;
+    if (scanningState.classList.contains("hidden")) location.reload();
+  });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(err => console.warn("SW registration failed:", err));
+    navigator.serviceWorker.register("sw.js").then(reg => reg.update()).catch(err => console.warn("SW registration failed:", err));
   });
 }
+
+document.getElementById("footerVersion").textContent = "v" + APP_VERSION;

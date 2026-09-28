@@ -1,3 +1,8 @@
 name = "linksniffer-api"
 main = "worker.js"
 compatibility_date = "2026-09-01"
+
+# Lock the worker to your own site once your GitHub Pages URL is known.
+# Leave unset (or "*") while testing.
+# [vars]
+# ALLOWED_ORIGIN = "https://yourname.github.io"
